@@ -148,6 +148,8 @@
 
 
     <link name="caster_wheel">
+        <mu1>0.001</mu1>
+        <mu2>0.001</mu2>
         <visual>
             <geometry>
                 <sphere radius="${caster_wheel_radius}"/>

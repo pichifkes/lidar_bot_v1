@@ -3,4 +3,15 @@
 
    <xacro:include filename= "robot_core.xacro"/>
 
+   <gazebo>
+      <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
+         <left_joint>left_wheel_joint</left_joint>
+         <right_joint>right_wheel_joint</right_joint>
+         <wheel_separation>${wheel_offset_y * 2}</wheel_separation>
+         <wheel_radius>${wheel_radius}</wheel_radius>
+         <topic>cmd_vel</topic>
+         <!-- Odom and other parameters can be added here -->
+      </plugin>
+   </gazebo>
+
 </robot>
