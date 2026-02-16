@@ -38,7 +38,7 @@ def generate_launch_description():
         executable='create',
         arguments=['-topic', 'robot_description',
                    '-name', 'my_bot',
-                   '-z', '0.5'],
+                   '-z', '0.5'], #making sure the bot is above ground
         output='screen'
     )
 
@@ -51,10 +51,38 @@ def generate_launch_description():
         output='screen'
     )
 
+    bridge_cmd_vel = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        # Change '[' to '@' so data flows from ROS (Keyboard) into Gazebo (Robot)
+        arguments=['/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist'],
+        #arguments=['/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist'],
+        output='screen'
+    )
+
+    # I recommend renaming this variable to just 'bridge_params' as it handles multiple things now
+    bridge_params = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        arguments=[
+            # 1. Command Velocity (ROS -> Gazebo)
+            '/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist',
+            
+            # 2. Clock (Gazebo -> ROS)
+            '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
+            
+            # 3. LIDAR SCAN (Gazebo -> ROS) [NEW LINE]
+            '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+        ],
+        output='screen'
+    )
+
     # Launch them all!
     return LaunchDescription([
         rsp,
         gazebo,
         spawn_entity,
         bridge,
+        bridge_cmd_vel,
+        bridge_params,
     ])

@@ -42,7 +42,7 @@
     <!-- BASE LINK -->
 
     <link name="base_link">
-
+      <!-- may need to add a mass and inertia-->>
     </link>
 
     <!-- BASE_FOOTPRINT LINK -->
@@ -87,56 +87,59 @@
 
        <!-- LEFT WHEEL LINK -->
 
-    <joint name="left_wheel_joint" type="continuous">
-        <parent link="base_link"/>
-        <child link="left_wheel"/>
-        <origin xyz="0 ${wheel_offset_y} 0" rpy="-${pi/2} 0 0" />
-        <axis xyz="0 0 1"/>
-    </joint>
+        <joint name="left_wheel_joint" type="continuous">
+            <parent link="base_link"/>
+            <child link="left_wheel"/>
+            <origin xyz="0 ${wheel_offset_y} 0" rpy="-${pi/2} 0 0" />
+            <axis xyz="0 0 1"/>
+        </joint>
 
-    <link name="left_wheel">
-        <visual>
-            <geometry>
-                <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
-            </geometry>
-            <material name="blue"/>
-        </visual>
-        <collision>
-            <geometry>
-                <sphere radius="${wheel_radius}"/>
-            </geometry>
-        </collision>
-        <xacro:inertial_cylinder mass="${wheel_mass}" length="${wheel_thickness}" radius="${wheel_radius}">
-            <origin xyz="0 0 0" rpy="0 0 0"/>
-        </xacro:inertial_cylinder>
-    </link>
+        <link name="left_wheel">
+            <visual>
+                <geometry>
+                    <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
+                </geometry>
+                <material name="blue"/>
+            </visual>
+            <collision>
+                <geometry>
+                    <!-- USE A CYLINDER FOR COLLISION -->
+                    <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
+                </geometry>
+                <!-- Add Gazebo-specific friction tags here -->
+            </collision>
+            <xacro:inertial_cylinder mass="${wheel_mass}" length="${wheel_thickness}" radius="${wheel_radius}">
+                <origin xyz="0 0 0" rpy="0 0 0"/>
+            </xacro:inertial_cylinder>
+        </link>
 
       <!-- RIGHT WHEEL LINK -->
 
-    <joint name="right_wheel_joint" type="continuous">
-        <parent link="base_link"/>
-        <child link="right_wheel"/>
-        <origin xyz="0 ${-wheel_offset_y} 0" rpy="${pi/2} 0 0" />
-        <axis xyz="0 0 -1"/>
-    </joint>
+        <joint name="right_wheel_joint" type="continuous">
+            <parent link="base_link"/>
+            <child link="right_wheel"/>
+            <origin xyz="0 ${-wheel_offset_y} 0" rpy="${pi/2} 0 0" />
+            <axis xyz="0 0 -1"/>
+        </joint>
 
-    <link name="right_wheel">
-        <visual>
-            <geometry>
-                <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
-            </geometry>
-            <material name="blue"/>
-        </visual>
-        <collision>
-            <geometry>
-                <sphere radius="${wheel_radius}"/>
-            </geometry>
-        </collision>
-        <xacro:inertial_cylinder mass="${wheel_mass}" length="${wheel_thickness}" radius="${wheel_radius}">
-            <origin xyz="0 0 0" rpy="0 0 0"/>
-        </xacro:inertial_cylinder>
-    </link>
-
+        <link name="right_wheel">
+            <visual>
+                <geometry>
+                    <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
+                </geometry>
+                <material name="blue"/>
+            </visual>
+            <collision>
+                <geometry>
+                    <!-- USE A CYLINDER FOR COLLISION -->
+                    <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
+                </geometry>
+                <!-- Add Gazebo-specific friction tags here -->
+            </collision>
+            <xacro:inertial_cylinder mass="${wheel_mass}" length="${wheel_thickness}" radius="${wheel_radius}">
+                <origin xyz="0 0 0" rpy="0 0 0"/>
+            </xacro:inertial_cylinder>
+        </link>
 
     <!-- CASTER WHEEL LINK -->
 
@@ -148,15 +151,15 @@
 
 
     <link name="caster_wheel">
-        <mu1>0.001</mu1>
-        <mu2>0.001</mu2>
         <visual>
             <geometry>
                 <sphere radius="${caster_wheel_radius}"/>
             </geometry>
-            <material name="white"/>
+            <material name="black"/>
         </visual>
         <collision>
+            <mu1>0.001</mu1>
+            <mu2>0.001</mu2>
             <geometry>
                 <sphere radius="${caster_wheel_radius}"/>
             </geometry>
@@ -165,6 +168,27 @@
             <origin xyz="0 0 0" rpy="0 0 0"/>
         </xacro:inertial_sphere>
     </link>
+
+
+     <gazebo>
+      <plugin filename = "gz-sim-diff-drive-system" name = "gz::sim::systems::DiffDrive">
+          <!-- Wheel Information -->
+         <left_joint>left_wheel_joint</left_joint>
+         <right_joint>right_wheel_joint</right_joint>
+         <wheel_separation>${wheel_offset_y * 2}</wheel_separation>
+         <wheel_radius>${wheel_radius}</wheel_radius>
+
+         <!-- Input -->
+         <topic>cmd_vel</topic>
+         
+         <!-- Output: Odometry & TF (CRITICAL FOR SLAM) -->
+         <odom_publish_frequency>20</odom_publish_frequency>
+         <topic_odom>odom</topic_odom> <!-- Publish to /odom topic -->
+         <frame_id>odom</frame_id>      <!-- World frame -->
+         <child_frame_id>base_link</child_frame_id> <!-- Robot frame -->
+         <tf_topic>/tf</tf_topic> <!-- Publish transforms -->
+      </plugin>
+    </gazebo>
 
 
 </robot>
