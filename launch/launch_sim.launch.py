@@ -13,7 +13,6 @@ def generate_launch_description():
     package_name='lidar_bot_v1' 
 
     # 1. Robot State Publisher
-    # (Kept mostly the same, but fixed 'ture' to 'true')
     rsp = IncludeLaunchDescription(
                 PythonLaunchDescriptionSource([os.path.join(
                     get_package_share_directory(package_name),'launch','rsp.launch.py'
@@ -21,9 +20,6 @@ def generate_launch_description():
     )
 
     # 2. Launch Gazebo (ros_gz_sim)
-    # We use gz_sim.launch.py instead of gazebo.launch.py
-    # gz_args="-r" runs the simulation immediately (no need to press play)
-    # gz_args="empty.sdf" loads the default empty world
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             [os.path.join(get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')]
@@ -31,58 +27,49 @@ def generate_launch_description():
         launch_arguments={'gz_args': '-r empty.sdf'}.items()
     )
 
-    # 3. Spawn Entity (create)
-    # Replaced spawn_entity.py with the 'create' node
+    # 3. Spawn Entity
     spawn_entity = Node(
         package='ros_gz_sim',
         executable='create',
         arguments=['-topic', 'robot_description',
                    '-name', 'my_bot',
-                   '-z', '0.5'], #making sure the bot is above ground
+                   '-z', '0.5'], 
         output='screen'
     )
 
-    # 4. ROS-GZ Bridge (NEW REQUIREMENT)
-    # This is necessary for ROS to get the simulation time from Gazebo
+    # 4. ROS-GZ Bridge (ALL IN ONE)
     bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
-        arguments=['/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock'],
-        output='screen'
-    )
-
-    bridge_cmd_vel = Node(
-        package='ros_gz_bridge',
-        executable='parameter_bridge',
-        # Change '[' to '@' so data flows from ROS (Keyboard) into Gazebo (Robot)
-        arguments=['/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist'],
-        #arguments=['/cmd_vel@geometry_msgs/msg/Twist]gz.msgs.Twist'],
-        output='screen'
-    )
-
-    # I recommend renaming this variable to just 'bridge_params' as it handles multiple things now
-    bridge_params = Node(
-        package='ros_gz_bridge',
-        executable='parameter_bridge',
         arguments=[
-            # 1. Command Velocity (ROS -> Gazebo)
-            '/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist',
-            
-            # 2. Clock (Gazebo -> ROS)
+            # A. Clock (Gazebo -> ROS)
             '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
             
-            # 3. LIDAR SCAN (Gazebo -> ROS) [NEW LINE]
+            # B. Command Velocity (ROS -> Gazebo)
+            '/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist',
+            
+            # C. Laser Scan (Gazebo -> ROS)
             '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+            
+            # D. Transforms / TF (Gazebo -> ROS)
+            '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V',
+            
+            # E. Odometry (Gazebo -> ROS)
+            '/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
+
+            # F. JOINT STATES (Gazebo -> ROS) *** VITAL FOR WHEELS IN RVIZ ***
+            '/world/empty/model/my_bot/joint_state@sensor_msgs/msg/JointState[gz.msgs.Model',
         ],
         output='screen'
     )
 
-    # Launch them all!
+    # 5. Joint State Relay (Optional but helps rename the topic)
+    # The topic coming from Gazebo is usually weirdly named, this fixes it
+    # But for now, let's stick to the bridge above.
+
     return LaunchDescription([
         rsp,
         gazebo,
         spawn_entity,
         bridge,
-        bridge_cmd_vel,
-        bridge_params,
     ])
