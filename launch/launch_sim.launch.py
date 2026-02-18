@@ -59,6 +59,7 @@ def generate_launch_description():
 
             # F. JOINT STATES (Gazebo -> ROS) *** VITAL FOR WHEELS IN RVIZ ***
             '/world/empty/model/my_bot/joint_state@sensor_msgs/msg/JointState[gz.msgs.Model',
+           # '/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model', ### this is potentialy simpler
         ],
         output='screen'
     )
