@@ -49,7 +49,7 @@ def generate_launch_description():
             '/cmd_vel@geometry_msgs/msg/Twist@gz.msgs.Twist',
             
             # C. Laser Scan (Gazebo -> ROS)
-            '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+            '/scan@sensor_msgs/msg/LaserScan@gz.msgs.LaserScan',
             
             # D. Transforms / TF (Gazebo -> ROS)
             '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V',
@@ -58,8 +58,8 @@ def generate_launch_description():
             '/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
 
             # F. JOINT STATES (Gazebo -> ROS) *** VITAL FOR WHEELS IN RVIZ ***
-            '/world/empty/model/my_bot/joint_state@sensor_msgs/msg/JointState[gz.msgs.Model',
-           # '/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model', ### this is potentialy simpler
+            #'/world/empty/model/my_bot/joint_state@sensor_msgs/msg/JointState[gz.msgs.Model',
+            '/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model', ### this is potentialy simpler
         ],
         output='screen'
     )

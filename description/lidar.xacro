@@ -36,7 +36,7 @@
             <pose> 0 0 0 0 0 0 </pose>
             <visualize>true</visualize>
             <update_rate>10</update_rate>
-            <topic>scan</topic> 
+            <topic>scan</topic> <!-- This enables the broadcast in the "Scan topic" -->
             <ray>
                 <scan>
                     <horizontal>
