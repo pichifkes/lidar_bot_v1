@@ -30,13 +30,17 @@
         </xacro:inertial_cylinder>
     </link>
 
-    <!-- 3. The Gazebo Sensor Plugin: This makes it actually "work" -->
+<!-- 3. The Gazebo Sensor Plugin -->
     <gazebo reference="laser_frame">
         <sensor name="laser" type="gpu_lidar">
             <pose> 0 0 0 0 0 0 </pose>
             <visualize>true</visualize>
             <update_rate>10</update_rate>
-            <topic>scan</topic> <!-- This enables the broadcast in the "Scan topic" -->
+            <topic>scan</topic>
+            
+            <!-- ADD THIS LINE TO FIX RVIZ TRANSFORMS -->
+            <gz_frame_id>laser_frame</gz_frame_id> 
+            
             <ray>
                 <scan>
                     <horizontal>
