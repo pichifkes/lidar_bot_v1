@@ -102,6 +102,8 @@
                 <material name="blue"/>
             </visual>
             <collision>
+                <mu1>1.00</mu1>
+                <mu2>1.00</mu2>
                 <geometry>
                     <!-- USE A CYLINDER FOR COLLISION -->
                     <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
@@ -130,6 +132,8 @@
                 <material name="blue"/>
             </visual>
             <collision>
+                <mu1>1.00</mu1>
+                <mu2>1.00</mu2>
                 <geometry>
                     <!-- USE A CYLINDER FOR COLLISION -->
                     <cylinder radius="${wheel_radius}" length="${wheel_thickness}"/>
@@ -158,8 +162,8 @@
             <material name="black"/>
         </visual>
         <collision>
-            <mu1>0.001</mu1>
-            <mu2>0.001</mu2>
+            <mu1>7.001</mu1>
+            <mu2>7.001</mu2>
             <geometry>
                 <sphere radius="${caster_wheel_radius}"/>
             </geometry>
@@ -180,6 +184,10 @@
 
          <!-- Input -->
          <topic>cmd_vel</topic>
+
+        <!-- makesacceleration smoother (gets rid of slipping -->>
+         <max_linear_acceleration>0.5</max_linear_acceleration>
+         <max_angular_acceleration>1.0</max_angular_acceleration>
          
          <!-- Output: Odometry & TF (CRITICAL FOR SLAM) -->
          <odom_publish_frequency>20</odom_publish_frequency>
