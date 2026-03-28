@@ -13,8 +13,8 @@ class FrontierExplorer(Node):
         self.map_sub = self.create_subscription(OccupancyGrid, '/map', self.map_callback, 1)
         
         self.navigator = BasicNavigator()
-        self.get_logger().info("Waiting for Nav2 to be ready...")
-        self.navigator.waitUntilNav2Active()
+        #self.get_logger().info("Waiting for Nav2 to be ready...")
+        #self.navigator.waitUntilNav2Active()
         self.get_logger().info("Nav2 is active! Starting autonomous exploration.")
         
         self.map_data = None
