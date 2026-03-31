@@ -29,9 +29,9 @@ def generate_launch_description():
             get_package_share_directory('nav2_bringup'), 'launch', 'navigation_launch.py'
         )]),
         launch_arguments={
-        'use_sim_time': 'true',
-        'params_file': os.path.join(get_package_share_directory(package_name), 'config', 'my_nav2_params.yaml')
-        }.items()`
+            'use_sim_time': 'true',
+            'params_file': os.path.join(get_package_share_directory(package_name), 'config', 'my_nav2_params.yaml')
+        }.items()
     )
 
     
@@ -56,6 +56,7 @@ def generate_launch_description():
         period=8.0, 
         actions=[explorer_cmd]
     )
+    print("This is the nav2 launch! It should start after SLAM and Gazebo are up and running!"),
 
     return LaunchDescription([
         sim_launch,
