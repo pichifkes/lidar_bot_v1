@@ -6,6 +6,7 @@ from sensor_msgs.msg import LaserScan
 from nav2_simple_commander.robot_navigator import BasicNavigator
 import numpy as np
 import math
+import time
 
 
 class MyExplorer(Node):
@@ -92,16 +93,16 @@ class MyExplorer(Node):
             distance_at_angle = msg.ranges[angle]
             
             # Check if the specific angle given is actually valid
-            if np.isinf(distance_at_angle) or np.isnan(distance_at_angle):
+            if not self.is_valid_distance(distance_at_angle):
                 self.get_logger().warning(f"Given angle: {angle} is NaN/Inf, but checking surroundings anyway.")
 
             # 1. Get all valid points in a 90 degree slice around the target angle
             # Note: 180 degrees is usually too large, as it grabs corners and other walls. 90 is safer.
-            points = self.get_cartesian_points_in_slice(msg.ranges, angle, fov=90)
+            points = self.pol_array_to_cartesian(msg.ranges, angle, fov=90)
             
             # We need at least a few points to make a line
             if len(points) < 5:
-                return None 
+                return None
 
             # 2. Fit an initial line using SVD (A math trick that handles vertical lines perfectly)
             centroid = np.mean(points, axis=0)
@@ -120,7 +121,8 @@ class MyExplorer(Node):
             # 4. Filter out the oddities (Calculate "Sureness" / Confidence)
             inliers_mask = distances < distance_threshold
             inliers = points[inliers_mask]
-            
+            self.get_logger().info(f"Inliers: {str(inliers)}, Points: {str(points)}")
+            time.sleep(5) 
             confidence = len(inliers) / len(points) # Example: 80 points align out of 100 = 0.80 (80%)
 
             # If sureness is too low, we don't have a reliable wall
@@ -154,10 +156,7 @@ class MyExplorer(Node):
         valid_ranges = [r for r in msg.ranges if not np.isinf(r) and not np.isnan(r)]
         min_dist = min(valid_ranges) if valid_ranges else float('inf')
         
-        
-        self.is_wall(0, msg) # Check front
-
-        self.get_logger().info(str(np.shape(msg.ranges)))
+        self.is_wall(0, msg)
         
         
             
