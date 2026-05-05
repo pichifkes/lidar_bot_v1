@@ -47,7 +47,7 @@ def generate_launch_description():
     # 5. Launch your custom Python Explorer Brain!
     # We use ExecuteProcess with your exact file path.
     explorer_cmd = ExecuteProcess(
-        cmd=['python3', os.path.expanduser('~/dev_ws/src/lidar_bot_v1/slam_auto_mapper.py')],
+        cmd=['python3', os.path.expanduser('~/dev_ws/src/lidar_bot_v1/testing.py')],
         output='screen'
     )
     

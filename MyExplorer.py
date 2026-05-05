@@ -1,52 +1,109 @@
 import rclpy
 from rclpy.node import Node
-from nav_msgs.msg import OccupancyGrid
-from geometry_msgs.msg import PoseStamped, Twist, Vector3
+from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
-from nav2_simple_commander.robot_navigator import BasicNavigator
+from nav_msgs.msg import Odometry
 import numpy as np
 import math
-import time
+from scipy.spatial import KDTree
 
 
-class MyExplorer(Node):
-    def __init__ (self):
-        super().__init__('my_explorer')
-
-        self.get_logger().info("J1ust Te11s1ting the logger")  
-        self.get_logger().error("This is a11n er1ror message!")
-        self.get_logger().warning("This is a war1ning message!")
-        self.get_logger().debug("This is a debug mes11sage! You won't see this unless you set the log level to DEBUG")
-        print("This is a print statemen111t. It will always show up in the terminal, even if the log level is set to INFO or higher. Use logging instead of print for better control over your output!")
-        # Subscribe to the map SLAM is building
-        #self.map_sub = self.create_subscription(OccupancyGrid, '/map', self.map_callback, 1)
+class PointMemory:
+    """ Spatial Hashing Grid to store global map points """
+    def __init__(self, cell_size=0.1):
+        self.cell_size = cell_size
+        self.grid = {}
         
-        # Publisher to drive the robot
-        self.publisher_ = self.create_publisher(Twist, '/cmd_vel', 10)
+    def add_global_points(self, points):
+        if points is None or len(points) == 0:
+            return
+        for p in points:
+            x_idx, y_idx = int(p[0] // self.cell_size), int(p[1] // self.cell_size)
+            self.grid[(x_idx, y_idx)] = self.grid.get((x_idx, y_idx), 0) + 1
+                
+    def get_confirmed_map_points(self, strength_threshold=5):
+        """ Returns only points that have appeared multiple times """
+        confirmed =[]
+        for coords, strength in self.grid.items():
+            if strength >= strength_threshold:
+                real_x = (coords[0] * self.cell_size) + (self.cell_size / 2)
+                real_y = (coords[1] * self.cell_size) + (self.cell_size / 2)
+                confirmed.append([real_x, real_y])
+        return np.array(confirmed) if confirmed else np.empty((0, 2))
 
-        self.Lidar_subscription = self.create_subscription(
-            LaserScan,
-            '/scan',
-            self.scan_callback,
-            10)
 
-        # define states for the robot to be in
-        self.state = "Clear" # Clear, Scanning, Obstacle, Turn, Follow Wall
+class CustomSLAM(Node):
+    def __init__(self):
+        super().__init__('custom_slam')
+        self.get_logger().info("Starting Custom SLAM & Exploration Node...")
 
-        # Initialize the Twist message for driving the robot
-        self.cmd = Twist()
+        # Memory and SLAM states
+        self.memory = PointMemory(cell_size=0.1)
+        self.last_odom_matrix = None
+        self.corrected_pose_matrix = self.get_transform_matrix(0.0, 0.0, 0.0)
 
-        # Initialize the BasicNavigator for Nav2
-        self.navigator = BasicNavigator()
-    
-    def is_valid_distance(self, distance):
-        """
-        Helper function to check if a distance reading from the Lidar is valid (not NaN or Inf).
+        # Autonomous Exploration State
+        self.state = "FORWARD"
+        self.front_clearance = 10.0
+        self.side_distance = 10.0 # Distance to wall on the right
+        self.wall_angle = 0.0     # Angle of the wall relative to robot
+        self.wall_bearing = 0.0    # Bearing to the wall (positive means wall is on the right)
+        self.desired_wall_distance = 0.5 # Target distance: 50cm
 
-        :param distance: The distance reading to check.
-        :return: True if the distance is valid, False otherwise.
-        """
-        return not np.isinf(distance) and not np.isnan(distance) and distance > 0.1
+        # Subscriptions & Publishers
+        self.odom_sub = self.create_subscription(Odometry, '/model/my_bot/odometry', self.odom_callback, 10)
+        self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
+        self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
+        
+        # Timer to run exploration logic continuously
+        self.timer = self.create_timer(0.1, self.exploration_loop)
+
+    # --- MATH & KINEMATICS UTILITIES ---
+    def euler_from_quaternion(self, q):
+        t0 = +2.0 * (q.w * q.z + q.x * q.y)
+        t1 = +1.0 - 2.0 * (q.y * q.y + q.z * q.z)
+        return math.atan2(t0, t1)
+
+    def get_transform_matrix(self, x, y, theta):
+        """ Creates a 2D 3x3 transformation matrix """
+        return np.array([[np.cos(theta), -np.sin(theta), x],[np.sin(theta),  np.cos(theta), y],
+            [0, 0, 1]
+        ])
+
+    def extract_pose(self, matrix):
+        """ Extracts x, y, theta from a 3x3 transformation matrix """
+        x, y = matrix[0, 2], matrix[1, 2]
+        theta = math.atan2(matrix[1, 0], matrix[0, 0])
+        return x, y, theta
+
+    def transform_points(self, points, matrix):
+        """ Transforms an array of [x, y] points using a 3x3 matrix """
+        if len(points) == 0: return points
+        ones = np.ones((points.shape[0], 1))
+        points_3d = np.hstack([points, ones])
+        transformed = np.dot(matrix, points_3d.T).T
+        return transformed[:, :2]
+
+    # --- SENSORS & SLAM ---
+    def odom_callback(self, msg):
+        """ Calculates exactly how much the wheels have moved since last tick """
+        x = msg.pose.pose.position.x
+        y = msg.pose.pose.position.y
+        theta = self.euler_from_quaternion(msg.pose.pose.orientation)
+        current_odom_matrix = self.get_transform_matrix(x, y, theta)
+        if self.last_odom_matrix is None:
+            self.last_odom_matrix = current_odom_matrix
+            return
+
+        # Calculate the delta (movement) from wheel odometry
+        # delta = inverse(old_odom) * new_odom
+        odom_delta = np.dot(np.linalg.inv(self.last_odom_matrix), current_odom_matrix)
+        
+        # Apply this delta to our internally tracked, ICP-corrected pose
+        self.corrected_pose_matrix = np.dot(self.corrected_pose_matrix, odom_delta)
+        
+        # Save current odom for next time
+        self.last_odom_matrix = current_odom_matrix
 
     def pol2cart(self,dist, angle_deg):
         """
@@ -68,11 +125,14 @@ class MyExplorer(Node):
         :param ranges: An array of distance readings from the Lidar, where each index corresponds to an angle (0-359 degrees).
         :return: A list of tuples [(x1, y1), (x2, y2), ...] representing the Cartesian coordinates of the points detected by the Lidar.
         """
+        if not len(ranges) == 360:
+            self.get_logger().error("Expected 360 Lidar readings, got {}".format(len(ranges)))
+            return
         points = []
         half_fov = fov // 2
         
         # Check angles from (center - half_fov) to (center + half_fov)
-        for i in range(-half_fov, half_fov + 1):
+        for i in range(-half_fov, half_fov):
             angle = (center_angle + i) % 360 # Wrap around (e.g., -10 becomes 350)
             dist = ranges[angle]
             
@@ -81,96 +141,156 @@ class MyExplorer(Node):
                 
         return np.array(points) # Return as numpy array for easy math
 
-    def is_wall(self, angle, msg, distance_threshold=0.15):
-            """
-            Detects a wall, removes outliers, and calculates confidence.
-
-            :param angle: The center angle to look for a wall.
-            :param msg: The LaserScan message.
-            :param distance_threshold: How close a point needs to be to the line (in meters) to be considered an "inlier".
-            :return: (wall_distance, wall_angle_deg, confidence) or None if no wall.
-            """
-            distance_at_angle = msg.ranges[angle]
-            
-            # Check if the specific angle given is actually valid
-            if not self.is_valid_distance(distance_at_angle):
-                self.get_logger().warning(f"Given angle: {angle} is NaN/Inf, but checking surroundings anyway.")
-
-            # 1. Get all valid points in a 90 degree slice around the target angle
-            # Note: 180 degrees is usually too large, as it grabs corners and other walls. 90 is safer.
-            points = self.pol_array_to_cartesian(msg.ranges, angle, fov=90)
-            
-            # We need at least a few points to make a line
-            if len(points) < 5:
-                return None
-
-            # 2. Fit an initial line using SVD (A math trick that handles vertical lines perfectly)
-            centroid = np.mean(points, axis=0)
-            centered_points = points - centroid
-            _, _, vh = np.linalg.svd(centered_points)
-            direction_vector = vh[0] # This represents the slope of our line [vx, vy]
-            
-            vx, vy = direction_vector
-            xc, yc = centroid
-
-            # 3. Calculate how far EVERY point is from this initial line
-            # Math formula for distance from point to line defined by a vector and a point
-            c = vx * yc - vy * xc
-            distances = np.abs(vy * points[:, 0] - vx * points[:, 1] + c)
-
-            # 4. Filter out the oddities (Calculate "Sureness" / Confidence)
-            inliers_mask = distances < distance_threshold
-            inliers = points[inliers_mask]
-            self.get_logger().info(f"Inliers: {str(inliers)}, Points: {str(points)}")
-            time.sleep(5) 
-            confidence = len(inliers) / len(points) # Example: 80 points align out of 100 = 0.80 (80%)
-
-            # If sureness is too low, we don't have a reliable wall
-            if confidence < 0.50: 
-                return None
-
-            # 5. Refit the line using ONLY the good points (inliers) for a perfect reading
-            centroid = np.mean(inliers, axis=0)
-            centered_points = inliers - centroid
-            _, _, vh = np.linalg.svd(centered_points)
-            direction_vector = vh[0]
-            
-            vx, vy = direction_vector
-            xc, yc = centroid
-            c = vx * yc - vy * xc
-
-            # 6. Calculate Final Wall Distance (Shortest distance from robot at 0,0 to the line)
-            wall_distance = abs(c)
-
-            # 7. Calculate Final Wall Angle
-            wall_angle_rad = math.atan2(vy, vx)
-            wall_angle_deg = np.degrees(wall_angle_rad)
-            
-            # Normalize angle to be between 0 and 180 
-            # (Because a wall extending North-South is the same as a wall extending South-North)
-            wall_angle_deg = wall_angle_deg % 180
-
-            return round(wall_distance, 3), round(wall_angle_deg, 2), round(confidence, 2)   
-
     def scan_callback(self, msg):
-        valid_ranges = [r for r in msg.ranges if not np.isinf(r) and not np.isnan(r)]
-        min_dist = min(valid_ranges) if valid_ranges else float('inf')
+        """ SLAM Pipeline: Read LiDAR -> RANSAC -> ICP Correction -> Map Update """
+        if self.last_odom_matrix is None: return
+
+        # 2. Extract valid Cartesian points
+        front_points = self.pol_array_to_cartesian(msg.ranges, center_angle=0, fov=60)
+
+        # 3. Denoise with RANSAC (Keep only walls)
+        clean_local_points = self.extract_walls_ransac(local_points)
+        if len(clean_local_points) < 10: return
+
+        # 4. ICP Localization (Fix wheel slip by aligning with known map)
+        map_points = self.memory.get_confirmed_map_points(strength_threshold=3)
+        if len(map_points) > 50:
+            # We have a map! Let's align our clean LiDAR scan to it.
+            # Initial guess is our Odometry-predicted pose
+            corrected_matrix = self.run_icp(clean_local_points, map_points, self.corrected_pose_matrix)
+            self.corrected_pose_matrix = corrected_matrix
+
+        # 5. Transform points to global frame using the CORRECTED pose
+        global_points = self.transform_points(clean_local_points, self.corrected_pose_matrix)
         
-        self.is_wall(0, msg)
+        # 6. Add to memory
+        self.memory.add_global_points(global_points)
+
+    def extract_walls_ransac(self, points, distance_threshold=0.1, iterations=20, min_inliers=10):
+        """ Keeps only points that form geometric lines """
+        wall_points =[]
+        unassigned = points.copy()
         
-        
+        while len(unassigned) >= min_inliers:
+            best_mask = None
+            best_inlier_count = 0
             
+            for _ in range(iterations):
+                idx = np.random.choice(len(unassigned), 2, replace=False)
+                p1, p2 = unassigned[idx]
+                v = p2 - p1
+                length = np.linalg.norm(v)
+                if length < 1e-6: continue
+                
+                nx, ny = -v[1]/length, v[0]/length
+                distances = np.abs((unassigned[:, 0] - p1[0]) * nx + (unassigned[:, 1] - p1[1]) * ny)
+                
+                inlier_mask = distances < distance_threshold
+                count = np.sum(inlier_mask)
+                
+                if count > best_inlier_count:
+                    best_inlier_count = count
+                    best_mask = inlier_mask
             
-def main():
-    rclpy.init()
-    explorer = MyExplorer()
-    while rclpy.ok():
-        print("Spinning the explorer node...")
-        rclpy.spin(explorer)
-    explorer.destroy_node()
+            if best_inlier_count < min_inliers: break
+            
+            wall_points.extend(unassigned[best_mask])
+            unassigned = unassigned[~best_mask]
+            
+        return np.array(wall_points)
+
+    # --- ITERATIVE CLOSEST POINT (ICP) ---
+    def run_icp(self, source_points, target_points, initial_guess_matrix, max_iterations=10, tolerance=0.001):
+        """ 
+        Snaps current LiDAR scan (source) to the Global Map (target).
+        This corrects Odometry drift using spatial landmarks!
+        """
+        target_tree = KDTree(target_points)
+        current_matrix = initial_guess_matrix.copy()
+
+        for i in range(max_iterations):
+            # 1. Transform source points using our current best guess
+            transformed_source = self.transform_points(source_points, current_matrix)
+
+            # 2. Find the closest map point for every LiDAR point
+            distances, indices = target_tree.query(transformed_source)
+            
+            # 3. Reject points that are too far away (they might be new unexplored areas)
+            valid_mask = distances < 0.5 
+            if np.sum(valid_mask) < 15:
+                break # Not enough overlapping points to fix localization, trust Odometry instead
+
+            matched_source = transformed_source[valid_mask]
+            matched_target = target_points[indices[valid_mask]]
+
+            # 4. Calculate Centers of Mass
+            centroid_source = np.mean(matched_source, axis=0)
+            centroid_target = np.mean(matched_target, axis=0)
+
+            # 5. Center the points
+            centered_source = matched_source - centroid_source
+            centered_target = matched_target - centroid_target
+
+            # 6. SVD to find the best rotation to align them
+            W = np.dot(centered_source.T, centered_target)
+            U, _, Vh = np.linalg.svd(W)
+            R = np.dot(U, Vh).T
+
+            # 7. Calculate translation
+            t = centroid_target - np.dot(R, centroid_source)
+
+            # 8. Update our transform matrix
+            delta_matrix = np.eye(3)
+            delta_matrix[0:2, 0:2] = R
+            delta_matrix[0:2, 2] = t
+            current_matrix = np.dot(delta_matrix, current_matrix)
+
+            # 9. Check if it converged (stopped moving)
+            if np.mean(distances[valid_mask]) < tolerance:
+                break
+
+        return current_matrix
+
+    # --- AUTONOMOUS EXPLORATION ---
+    def exploration_loop(self):
+        """ Simple Finite State Machine to drive around the room safely """
+        cmd = Twist()
+
+        # Decide State
+        if self.front_clearance < 0.8:  # Wall is closer than 80 cm
+            self.state = "TURN"
+        else:
+            self.state = "FORWARD"
+
+        # Execute State
+        if self.state == "FORWARD":
+            cmd.linear.x = 0.25      # Drive forward 0.25 m/s
+            cmd.angular.z = 0.0
+        elif self.state == "TURN":
+            cmd.linear.x = 0.0
+            cmd.angular.z = 0.5      # Spin to find an open path
+
+        self.cmd_pub.publish(cmd)
+
+        # Print Status
+        x, y, theta = self.extract_pose(self.corrected_pose_matrix)
+        map_size = len(self.memory.get_confirmed_map_points())
+        self.get_logger().info(f"State: {self.state} | Pos: ({x:.2f}, {y:.2f}) | Confirmed Map Points: {map_size}")
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    slam_node = CustomSLAM()
+    
+    try:
+        rclpy.spin(slam_node)
+    except KeyboardInterrupt:
+        pass
+        
+    stop_cmd = Twist()
+    slam_node.cmd_pub.publish(stop_cmd)
+    slam_node.destroy_node()
     rclpy.shutdown()
 
 if __name__ == '__main__':
     main()
-else:
-    print("Fuck out of here!")

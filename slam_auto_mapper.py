@@ -45,9 +45,10 @@ class CustomSLAM(Node):
         # Autonomous Exploration State
         self.state = "FORWARD"
         self.front_clearance = 10.0
+        
 
         # Subscriptions & Publishers
-        self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+        self.odom_sub = self.create_subscription(Odometry, '/model/my_bot/odometry', self.odom_callback, 10)
         self.scan_sub = self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         
@@ -87,7 +88,6 @@ class CustomSLAM(Node):
         y = msg.pose.pose.position.y
         theta = self.euler_from_quaternion(msg.pose.pose.orientation)
         current_odom_matrix = self.get_transform_matrix(x, y, theta)
-
         if self.last_odom_matrix is None:
             self.last_odom_matrix = current_odom_matrix
             return

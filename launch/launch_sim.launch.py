@@ -63,7 +63,7 @@ def generate_launch_description():
             '/tf@tf2_msgs/msg/TFMessage[gz.msgs.Pose_V',
             
             # E. Odometry (Gazebo -> ROS)
-            '/odom@nav_msgs/msg/Odometry[gz.msgs.Odometry',
+            '/model/my_bot/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry',
 
             # F. JOINT STATES (Gazebo -> ROS) *** VITAL FOR WHEELS IN RVIZ ***
             #'/world/empty/model/my_bot/joint_state@sensor_msgs/msg/JointState[gz.msgs.Model',
