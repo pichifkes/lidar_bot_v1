@@ -58,6 +58,9 @@ class CustomSLAM(Node):
         # Timer to run exploration logic continuously
         self.timer = self.create_timer(0.1, self.exploration_loop)
 
+        # Timer to save map periodically
+        self.save_timer = self.create_timer(30.0, self.save_map)
+
     # --- MATH & KINEMATICS UTILITIES ---
     def euler_from_quaternion(self, q):
         t0 = +2.0 * (q.w * q.z + q.x * q.y)
@@ -85,6 +88,10 @@ class CustomSLAM(Node):
         return transformed[:, :2]
 
     # --- SENSORS & SLAM ---
+    def is_valid_distance(self, dist):
+        """ Checks if a distance reading is valid (not inf, nan, or out of range) """
+        return not math.isinf(dist) and not math.isnan(dist) and 0.1 < dist < 10.0
+
     def odom_callback(self, msg):
         """ Calculates exactly how much the wheels have moved since last tick """
         x = msg.pose.pose.position.x
@@ -121,32 +128,51 @@ class CustomSLAM(Node):
     def pol_array_to_cartesian(self, ranges, center_angle=0, fov=90):
         """
         Converts an array of polar coordinates (Lidar ranges) to Cartesian coordinates.
+        Assumes index len(ranges)/2 is front (0 degrees).
 
-        :param ranges: An array of distance readings from the Lidar, where each index corresponds to an angle (0-359 degrees).
-        :return: A list of tuples [(x1, y1), (x2, y2), ...] representing the Cartesian coordinates of the points detected by the Lidar.
+        :param ranges: An array of distance readings from the Lidar.
+        :param center_angle: The center angle in degrees relative to front.
+        :param fov: Field of view in degrees.
+        :return: A numpy array of [x, y] points.
         """
-        if not len(ranges) == 360:
-            self.get_logger().error("Expected 360 Lidar readings, got {}".format(len(ranges)))
-            return
-        points = []
-        half_fov = fov // 2
+        num_readings = len(ranges)
+        angle_inc = 360.0 / num_readings
         
-        # Check angles from (center - half_fov) to (center + half_fov)
-        for i in range(-half_fov, half_fov):
-            angle = (center_angle + i) % 360 # Wrap around (e.g., -10 becomes 350)
-            dist = ranges[angle]
+        # Center index (0 degrees) is usually middle of the array for -PI to PI scans
+        front_idx = num_readings // 2
+        center_idx = int(front_idx + (center_angle / angle_inc))
+        
+        points = []
+        half_fov_readings = int((fov / 2) / angle_inc)
+        
+        for i in range(-half_fov_readings, half_fov_readings):
+            idx = (center_idx + i) % num_readings
+            dist = ranges[idx]
             
             if self.is_valid_distance(dist):
+                # Calculate angle such that 0 is front, positive is left (CCW)
+                angle = (idx - front_idx) * angle_inc
                 points.append(self.pol2cart(dist, angle))
                 
-        return np.array(points) # Return as numpy array for easy math
+        return np.array(points) if points else np.empty((0, 2))
 
     def scan_callback(self, msg):
         """ SLAM Pipeline: Read LiDAR -> RANSAC -> ICP Correction -> Map Update """
         if self.last_odom_matrix is None: return
 
-        # 2. Extract valid Cartesian points
-        front_points = self.pol_array_to_cartesian(msg.ranges, center_angle=0, fov=60)
+        # 1. Update front_clearance for obstacle avoidance (check front 60 degrees)
+        front_ranges = []
+        num_readings = len(msg.ranges)
+        center_idx = num_readings // 2 # Index 180 is front (0 degrees)
+        for i in range(center_idx - 30, center_idx + 30):
+            dist = msg.ranges[i % num_readings]
+            if self.is_valid_distance(dist):
+                front_ranges.append(dist)
+        self.front_clearance = min(front_ranges) if front_ranges else 10.0
+
+        # 2. Extract valid Cartesian points (Full 360 for mapping)
+        local_points = self.pol_array_to_cartesian(msg.ranges, center_angle=0, fov=360)
+        if local_points is None or len(local_points) < 10: return
 
         # 3. Denoise with RANSAC (Keep only walls)
         clean_local_points = self.extract_walls_ransac(local_points)
@@ -165,6 +191,15 @@ class CustomSLAM(Node):
         
         # 6. Add to memory
         self.memory.add_global_points(global_points)
+
+    def save_map(self, filename="point_cloud_map.txt"):
+        """ Saves confirmed map points to a file """
+        map_points = self.memory.get_confirmed_map_points(strength_threshold=5)
+        if len(map_points) > 0:
+            np.savetxt(filename, map_points, fmt='%.4f', header='x y')
+            self.get_logger().info(f"Saved {len(map_points)} map points to {filename}")
+        else:
+            self.get_logger().info("No confirmed map points to save yet.")
 
     def extract_walls_ransac(self, points, distance_threshold=0.1, iterations=20, min_inliers=10):
         """ Keeps only points that form geometric lines """
@@ -287,6 +322,9 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
         
+    # Save the final map before exiting
+    slam_node.save_map("final_point_cloud_map.txt")
+    
     stop_cmd = Twist()
     slam_node.cmd_pub.publish(stop_cmd)
     slam_node.destroy_node()
